@@ -2,15 +2,12 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"math/rand"
-	"os"
-	"os/exec"
 	"sync"
 	"time"
 
-	"github.com/eiannone/keyboard"
+	"github.com/gdamore/tcell/v2"
 )
 
 const (
@@ -22,22 +19,24 @@ const (
 )
 
 type gameConf struct {
-	size  int
 	level int
 	debug bool
 }
 type appConfig struct {
+	screen        tcell.Screen
+	defStyle      tcell.Style
 	speed         time.Duration
 	conf          gameConf
 	curDirection  int
 	nextDirection int
 	curSnackBody  []position
 	applePos      position
-	clearCmd      *exec.Cmd
 	gameExit      chan bool
 	wg            sync.WaitGroup
 	random        *rand.Rand
 	score         int
+	xSize         int
+	ySize         int
 }
 type position struct {
 	x int
@@ -46,25 +45,34 @@ type position struct {
 
 func main() {
 	app := gameInit()
+	defer app.screen.Fini()
 	app.wg.Add(2)
 	go app.keyPressEventListener()
 	go app.snackMove()
 	app.wg.Wait()
-	fmt.Println("GAME OVER")
 }
 func gameInit() *appConfig {
 	app := &appConfig{}
 
-	flag.IntVar(&app.conf.size, "size", 30, "size of the map")
-	flag.IntVar(&app.conf.level, "level", 1, "game difficulty 1 to 10")
+	flag.IntVar(&app.conf.level, "level", 10, "game difficulty 1 to 10")
 	flag.BoolVar(&app.conf.debug, "debug", false, "debug mode (through wall)")
 	flag.Parse()
 
+	var err error
+	app.screen, err = tcell.NewScreen()
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
+	err = app.screen.Init()
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
+	app.defStyle = tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
+	app.screen.SetStyle(app.defStyle)
+	app.xSize, app.ySize = app.screen.Size()
+
 	app.speed = time.Millisecond * time.Duration(525-app.conf.level*50)
 	app.random = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	app.clearCmd = exec.Command("clear")
-	app.clearCmd.Stdout = os.Stdout
 
 	app.gameExit = make(chan bool)
 
@@ -73,8 +81,8 @@ func gameInit() *appConfig {
 
 	app.curSnackBody = make([]position, 5)
 	for i := range app.curSnackBody {
-		app.curSnackBody[i].x = app.conf.size / 2
-		app.curSnackBody[i].y = app.conf.size/2 - 2 + i
+		app.curSnackBody[i].x = app.xSize / 2
+		app.curSnackBody[i].y = app.ySize/2 - 2 + i
 	}
 
 	app.genNewApple()
@@ -83,34 +91,33 @@ func gameInit() *appConfig {
 }
 func (app *appConfig) genNewApple() {
 	app.applePos = position{
-		x: rand.Intn(app.conf.size-2) + 1,
-		y: rand.Intn(app.conf.size-2) + 1,
+		x: rand.Intn(app.xSize-2) + 1,
+		y: rand.Intn(app.ySize-2) + 1,
 	}
 }
 func (app *appConfig) keyPressEventListener() {
-	if err := keyboard.Open(); err != nil {
-		log.Fatal(err)
-	}
 	defer app.wg.Done()
-	defer keyboard.Close()
 	for {
 		select {
 		case <-app.gameExit:
 			return
 		default:
-			_, key, err := keyboard.GetKey()
-			if err != nil {
-				log.Fatal(err)
-			}
-			switch key {
-			case keyboard.KeyArrowUp:
-				app.nextDirection = posUp
-			case keyboard.KeyArrowDown:
-				app.nextDirection = posDown
-			case keyboard.KeyArrowLeft:
-				app.nextDirection = posLeft
-			case keyboard.KeyArrowRight:
-				app.nextDirection = posRight
+			switch ev := app.screen.PollEvent().(type) {
+			case *tcell.EventKey:
+				switch ev.Key() {
+				case tcell.KeyUp:
+					app.nextDirection = posUp
+				case tcell.KeyDown:
+					app.nextDirection = posDown
+				case tcell.KeyLeft:
+					app.nextDirection = posLeft
+				case tcell.KeyRight:
+					app.nextDirection = posRight
+				case tcell.KeyEsc:
+					fallthrough
+				case tcell.KeyCtrlC:
+					app.quitGame()
+				}
 			}
 		}
 	}
@@ -159,6 +166,7 @@ func (app *appConfig) snackMove() {
 				newSnack[i] = app.curSnackBody[i-1]
 			}
 			if eatTheApple {
+				app.screen.Beep()
 				newSnack = append(newSnack, app.curSnackBody[len(app.curSnackBody)-1])
 				app.genNewApple()
 				app.score += 10
@@ -178,12 +186,12 @@ func (app *appConfig) hitTheWallChecker(snackHead position) (position, bool) {
 	newPosition := snackHead
 	switch {
 	case snackHead.x == 0:
-		newPosition.x = app.conf.size - 2
-	case snackHead.x == app.conf.size-1:
+		newPosition.x = app.xSize - 2
+	case snackHead.x == app.xSize-1:
 		newPosition.x = 1
 	case snackHead.y == 0:
-		newPosition.y = app.conf.size - 2
-	case snackHead.y == app.conf.size-1:
+		newPosition.y = app.ySize - 2
+	case snackHead.y == app.ySize-1:
 		newPosition.y = 1
 	}
 	if newPosition != snackHead {
@@ -193,19 +201,19 @@ func (app *appConfig) hitTheWallChecker(snackHead position) (position, bool) {
 }
 func (app *appConfig) render(snackPosition []position) {
 	// initialize array length
-	output := make([][]string, app.conf.size)
+	output := make([][]rune, app.ySize)
 	for i := range output {
-		output[i] = make([]string, app.conf.size)
+		output[i] = make([]rune, app.xSize)
 		for j := range output[i] {
 			switch {
 			case i == app.applePos.y && j == app.applePos.x:
-				output[i][j] = "A"
-			case i == app.conf.size-1 || i == 0:
-				output[i][j] = "W"
-			case j == app.conf.size-1 || j == 0:
-				output[i][j] = "W"
+				output[i][j] = 'A'
+			case i == app.ySize-1 || i == 0:
+				output[i][j] = 'W'
+			case j == app.xSize-1 || j == 0:
+				output[i][j] = 'W'
 			default:
-				output[i][j] = " "
+				output[i][j] = ' '
 			}
 		}
 	}
@@ -213,21 +221,20 @@ func (app *appConfig) render(snackPosition []position) {
 	// render snack on the map
 	for _, pos := range snackPosition {
 		conditionY_1 := pos.y >= 0
-		conditionY_2 := pos.y < app.conf.size
+		conditionY_2 := pos.y < app.ySize
 		conditionX_1 := pos.x >= 0
-		conditionX_2 := pos.x < app.conf.size
+		conditionX_2 := pos.x < app.xSize
 		if conditionY_1 && conditionY_2 && conditionX_1 && conditionX_2 {
-			output[pos.y][pos.x] = "O"
+			output[pos.y][pos.x] = 'O'
 		}
 	}
-	app.clearCmd.Run()
-	fmt.Printf("SCORE : %d\n", app.score)
+	app.screen.Clear()
 	for i := range output {
 		for j := range output[i] {
-			fmt.Print(output[i][j])
+			app.screen.SetContent(j, i, output[i][j], nil, app.defStyle)
 		}
-		fmt.Print("\n")
 	}
+	app.screen.Show()
 }
 
 func (app *appConfig) quitGame() {
