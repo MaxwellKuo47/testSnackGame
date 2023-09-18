@@ -54,7 +54,7 @@ func main() {
 func gameInit() *appConfig {
 	app := &appConfig{}
 
-	flag.IntVar(&app.conf.level, "level", 10, "game difficulty 1 to 10")
+	flag.IntVar(&app.conf.level, "level", 5, "game difficulty 1 to 10")
 	flag.BoolVar(&app.conf.debug, "debug", false, "debug mode (through wall)")
 	flag.Parse()
 
@@ -71,7 +71,7 @@ func gameInit() *appConfig {
 	app.screen.SetStyle(app.defStyle)
 	app.xSize, app.ySize = app.screen.Size()
 
-	app.speed = time.Millisecond * time.Duration(525-app.conf.level*50)
+	app.speed = time.Millisecond * time.Duration(405-app.conf.level*40)
 	app.random = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	app.gameExit = make(chan bool)
@@ -91,8 +91,8 @@ func gameInit() *appConfig {
 }
 func (app *appConfig) genNewApple() {
 	app.applePos = position{
-		x: rand.Intn(app.xSize-2) + 1,
-		y: rand.Intn(app.ySize-2) + 1,
+		x: app.random.Intn(app.xSize-2) + 1,
+		y: app.random.Intn(app.ySize-2) + 1,
 	}
 }
 func (app *appConfig) keyPressEventListener() {
@@ -150,12 +150,17 @@ func (app *appConfig) snackMove() {
 			case posRight:
 				newSnack[0].x++
 			}
-			for _, pos := range app.curSnackBody {
-				if newSnack[0] == pos {
-					app.quitGame()
+
+			// check hit the body
+			if !app.conf.debug {
+				for _, pos := range app.curSnackBody {
+					if newSnack[0] == pos {
+						app.quitGame()
+					}
 				}
 			}
 			newHead, hit := app.hitTheWallChecker(newSnack[0])
+
 			if !app.conf.debug && hit {
 				app.quitGame()
 			} else {
@@ -170,6 +175,7 @@ func (app *appConfig) snackMove() {
 				newSnack = append(newSnack, app.curSnackBody[len(app.curSnackBody)-1])
 				app.genNewApple()
 				app.score += 10
+				app.scoreChecker()
 			}
 			app.curSnackBody = newSnack
 
@@ -198,6 +204,12 @@ func (app *appConfig) hitTheWallChecker(snackHead position) (position, bool) {
 		return newPosition, true
 	}
 	return snackHead, false
+}
+func (app *appConfig) scoreChecker() {
+	if app.score%100 == 0 && app.conf.level != 10 {
+		app.conf.level++
+		app.speed = time.Millisecond * time.Duration(405-app.conf.level*40)
+	}
 }
 func (app *appConfig) render(snackPosition []position) {
 	// initialize array length
