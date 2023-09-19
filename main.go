@@ -117,6 +117,14 @@ func (app *appConfig) keyPressEventListener() {
 					app.nextDirection = posLeft
 				case tcell.KeyRight:
 					app.nextDirection = posRight
+				case tcell.KeyF7:
+					if app.conf.debug {
+						app.faster()
+					}
+				case tcell.KeyF8:
+					if app.conf.debug {
+						app.slower()
+					}
 				case tcell.KeyEsc:
 					fallthrough
 				case tcell.KeyCtrlC:
@@ -210,11 +218,25 @@ func (app *appConfig) hitTheWallChecker(snackHead position) (position, bool) {
 	return snackHead, false
 }
 func (app *appConfig) scoreChecker() {
-	if app.score%100 == 0 && app.conf.level != 10 {
+	if app.score%100 == 0 {
+		app.faster()
+	}
+}
+
+func (app *appConfig) faster() {
+	if app.conf.level < 10 {
 		app.conf.level++
 		app.speed = time.Millisecond * time.Duration(405-app.conf.level*40)
 	}
 }
+
+func (app *appConfig) slower() {
+	if app.conf.level > 1 {
+		app.conf.level--
+		app.speed = time.Millisecond * time.Duration(405-app.conf.level*40)
+	}
+}
+
 func (app *appConfig) render(snackPosition []position) {
 	// initialize array length
 	output := make([][]rune, app.ySize)
