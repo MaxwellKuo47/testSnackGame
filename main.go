@@ -58,6 +58,10 @@ func gameInit() *appConfig {
 	flag.BoolVar(&app.conf.debug, "debug", false, "debug mode (through wall)")
 	flag.Parse()
 
+	if app.conf.level < 1 || app.conf.level > 10 {
+		log.Fatal("invalid level value")
+	}
+
 	var err error
 	app.screen, err = tcell.NewScreen()
 	if err != nil {
